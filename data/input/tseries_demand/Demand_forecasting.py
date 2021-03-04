@@ -27,35 +27,45 @@ test_df = load_data('./test/features.csv')
 
 # Preprocess function 
 def preprocessing_data(train_data):
-    # convert data types
     train_data['date'] = pd.to_datetime(train_data['date'])
+    
+    #time features
     train_data['month'] = train_data['date'].dt.month
     train_data['day'] = train_data['date'].dt.dayofweek
     train_data['year'] = train_data['date'].dt.year
-
-
-    col = [i for i in test_data.columns if i not in ['date','id']]
+    
+    #feature engineering
+    
+    #lag features
+    train_data['lag_t28'] = train_data.groupby(['store','item'])['sales'].transform(lambda x: x.shift(28))
+    train_data['lag_t29'] = train_data.groupby(['store','item'])['sales'].transform(lambda x: x.shift(29))
+    train_data['lag_t30'] = train_data.groupby(['store','item'])['sales'].transform(lambda x: x.shift(30))
+    
+    #rolling window features
+    #mean
+    train_data['rolling_mean_weekly'] = train_data['sales'].rolling(window=7).mean()
+    train_data['rolling_mean_monthly'] = train_data['sales'].rolling(window=30).mean()
+    
+    #standard deviation
+    train_data['rolling_std_weekly'] = train_data['sales'].rolling(window=7).std()
+    train_data['rolling_std_monthly'] = train_data['sales'].rolling(window=30).std()
+    
+    
+    col = [i for i in train_data.columns if i not in ['date','id']]
     y = 'sales'
 
-    return train, col
+    return train_data, col, y
 
 
 
 
-train, col = preprocessing_data(train_df)
-
-test, col = preprocessing_data(test_df)
-
-
-
-
-
+train_data, col, y = preprocessing_data(train_df)
 
 
 ########################################################################################
-# split into train and validation data
-train_x, test_x, train_y, test_y = train_test_split(train_data[col],train_data[y], test_size=0.2, random_state=2018)
-
+# split into train and validation and test data
+train_x, test_x, train_y, test_y = train_test_split(train_data[col],train_data[y], test_size=0.3, random_state=2018)
+val_x, test_x, val_y, test_y = train_test_split(test_x[col],test_y, test_size=0.33, random_state=2018)
 
 # Train function
 def train_model(train_x,train_y,test_x,test_y,col):
@@ -87,7 +97,9 @@ def train_model(train_x,train_y,test_x,test_y,col):
 model = train_model(train_x,train_y,test_x,test_y,col)
 
 # Predict
-y_test = model.predict(test_df[col])
+predicted = model.predict(test_x[col])
 # save predicted sales to csv file
-test_df['sales'] = y_test
-test_df.to_csv('./Predicted_Sales.csv')
+test_x['sales'] = test_y
+test_x['Predicted_sales'] = predicted
+test_x['error'] = test_x['sales']- test_x['Predicted_sales']
+test_x.to_csv('./Predicted_Sales.csv')
