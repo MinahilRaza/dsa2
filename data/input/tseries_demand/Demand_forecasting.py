@@ -25,31 +25,92 @@ train_df = load_data('./train/features.csv')
 test_df = load_data('./test/features.csv')
 
 
-# Preprocess function 
+# Preprocess functions from prepro_tseries
+def pd_ts_date(df: pd.DataFrame, cols: list=None, pars: dict=None):
+    """ DataFrame with date column"""
+    df      = df[cols]
+    coldate = [cols] if isinstance(cols, str) else cols
+    print(coldate)
+    col_add = pars.get('col_add', ['day', ',month'])
+    print(col_add)
+    dfdate  =  None
+    df2     = pd.DataFrame()
+    for coli in coldate:
+        df2[coli]               = pd.to_datetime(df[coli], errors='coerce')
+        if 'day'  in col_add      : df2[coli + '_day']      = df2[coli].dt.day
+        if 'month'  in col_add    : df2[coli + '_month']    = df2[coli].dt.month
+        if 'year'  in col_add     : df2[coli + '_year']     = df2[coli].dt.year
+        if 'hour'  in col_add     : df2[coli + '_hour']     = df2[coli].dt.hour
+        if 'minute'  in col_add   : df2[coli + '_minute']   = df2[coli].dt.minute
+        if 'weekday'  in col_add  : df2[coli + '_weekday']  = df2[coli].dt.weekday
+        if 'dayyear'  in col_add  : df2[coli + '_dayyear']  = df2[coli].dt.dayofyear
+        if 'weekyear'  in col_add : df2[coli + '_weekyear'] = df2[coli].dt.weekofyear
+        dfdate = pd.concat((dfdate, df2 )) if dfdate is not None else df2
+        del dfdate[coli]  ### delete col
+
+    ##### output  ##########################################
+    col_pars = {}
+    col_pars['cols_new'] = {
+        # 'colcross_single'     :  col ,    ###list
+        'dfdate': list(dfdate.columns)  ### list
+    }
+    return dfdate, col_pars
+
+def pd_ts_rolling(df: pd.DataFrame, cols: list=None, pars: dict=None):
+    """
+      Rolling statistics
+
+    """
+    cat_cols     = []
+    col_new      = []
+    colgroup     = pars.get('col_groupby', ['id'])
+    colstat      = pars['col_stat']
+    lag_list     = pars.get('lag_list', [7, 14, 30, 60, 180])
+    id_cols      = []
+
+    len_shift = 28
+    for i in lag_list:
+        print('Rolling period:', i)
+        df['rolling_mean_' + str(i)] = df.groupby(colgroup)[colstat].transform(
+            lambda x: x.shift(len_shift).rolling(i).mean())
+
+        df['rolling_std_' + str(i)] = df.groupby(colgroup)[colstat].transform(
+            lambda x: x.shift(len_shift).rolling(i).std())
+
+        col_new.append('rolling_mean_' + str(i))
+        col_new.append('rolling_std_' + str(i))
+
+    # Rollings
+    # with sliding shift
+    for len_shift in [1, 7, 14]:
+        print('Shifting period:', len_shift)
+        for len_window in [7, 14, 30, 60]:
+            col_name = 'rolling_mean_tmp_' + str(len_shift) + '_' + str(len_window)
+            df[col_name] = df.groupby(colgroup)[colstat].transform(
+                lambda x: x.shift(len_shift).rolling(len_window).mean())
+            col_new.append(col_name)
+
+    for col_name in id_cols:
+        col_new.append(col_name)
+
+    return df[col_new], cat_cols
+
+
+
+ 
 def preprocessing_data(train_data):
     train_data['date'] = pd.to_datetime(train_data['date'])
     
     #time features
-    train_data['month'] = train_data['date'].dt.month
-    train_data['day'] = train_data['date'].dt.dayofweek
-    train_data['year'] = train_data['date'].dt.year
+    df1, col1 = pd_ts_date(train_data, ['date'], {'col_add':['day', 'month', 'year', 'weekday']})
     
     #feature engineering
     
-    #lag features
-    train_data['lag_t28'] = train_data.groupby(['store','item'])['sales'].transform(lambda x: x.shift(28))
-    train_data['lag_t29'] = train_data.groupby(['store','item'])['sales'].transform(lambda x: x.shift(29))
-    train_data['lag_t30'] = train_data.groupby(['store','item'])['sales'].transform(lambda x: x.shift(30))
+    #lag features, rolling window features
+    df2, col2 = pd_ts_rolling(train_data, ['date', 'item', 'store', 'sales'], {'col_groupby' : ['store','item'],'col_stat': 'sales', 'lag_list': [7, 30]})
     
-    #rolling window features
-    #mean
-    train_data['rolling_mean_weekly'] = train_data['sales'].rolling(window=7).mean()
-    train_data['rolling_mean_monthly'] = train_data['sales'].rolling(window=30).mean()
-    
-    #standard deviation
-    train_data['rolling_std_weekly'] = train_data['sales'].rolling(window=7).std()
-    train_data['rolling_std_monthly'] = train_data['sales'].rolling(window=30).std()
-    
+    #combine
+    train_data = pd.concat([train_data, df1], axis=1)
     
     col = [i for i in train_data.columns if i not in ['date','id']]
     y = 'sales'
