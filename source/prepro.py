@@ -11,38 +11,36 @@ import sys, gc, os, pandas as pd, json, copy, numpy as np
 ####################################################################################################
 #### Add path for python import
 sys.path.append( os.path.dirname(os.path.abspath(__file__)) + "/")
-
-
-#### Root folder analysis
-root = os.path.abspath(os.getcwd()).replace("\\", "/") + "/"
-print(root)
-
-
-#### Debuging state (Ture/False)
-DEBUG_=True
+from util_feature import  (save,  load, save_features, os_get_function_name,
+                           params_check)
+import util_feature
 
 ####################################################################################################
 ####################################################################################################
+"""
+from util import logger_class
+logger = logger_class()
+
+def log(*s):
+    logger.log(*s, level=1)
+
+def log2(*s):
+    logger.log(*s, level=2)
+
+def log_pd(df, *s, n=0, m=1):
+    sjump = "\n" * m
+    log(sjump,  df.head(n))
+"""
+
+
 def log(*s, n=0, m=1):
     sspace = "#" * n
     sjump = "\n" * m
     ### Implement pseudo Logging
-    print(sjump, sspace, s, sspace, flush=True)
+    print(sjump, sspace, *s, sspace, flush=True)
 
-def logs(*s):
-    if DEBUG_:
-        print(*s, flush=True)
-
-
-def log_pd(df, *s, n=0, m=1):
-    sjump = "\n" * m
-    ### Implement pseudo Logging
-    print(sjump,  df.head(n), flush=True)
-
-
-from util_feature import  (save,  load, save_features, os_get_function_name,
-                           params_check)
-import util_feature
+def log2(*s, n=0, m=1):
+    print(*s, flush=True)
 
 
 def _pd_colnum(df, col, pars):
@@ -57,43 +55,50 @@ def _pd_colnum_fill_na_median(df, col, pars):
         df[quant_col].fillna((df[quant_col].median()), inplace=True)
 
 
+
+
+
+
 ####################################################################################################
 ####################################################################################################
-def pd_col_atemplate(df: pd.DataFrame, col: list=None, pars: dict=None):
+def prepro_load(prefix, pars):
+    """  Load previously savec preprocessors
+    :param prefix:
+    :param pars:
+    :return:
     """
-    Example of custom Processor
-    Used at prediction time
-        "path_pipeline"  : 
+    prepro = None
+    pars_saved = None
+    cols_saved = None
+    if "path_pipeline" in pars :
+        prepro         = load(pars["path_pipeline"] + f"/{prefix}_model.pkl" )
+        pars_saved     = load(pars["path_pipeline"] + f"/{prefix}_pars.pkl" )
+        cols_saved     = load(pars["path_pipeline"] + f"/{prefix}_cols.pkl" )
 
-    Training time :
-        "path_features_store" :  to store intermediate dataframe
-        "path_pipeline_export":  to store pipeline  for later usage
+    return prepro, pars_saved, cols_saved
 
+
+def prepro_save(prefix, pars, df_new, cols_new, prepro) -> (pd.DataFrame, dict) :
+    """  Save preprocessors and export
+    :param prefix:
+    :param pars:
+    :param df_new:
+    :param cols_new:
+    :param prepro:
+    :param pars_prepro:
+    :return:
     """
-    from source.util_feature import save, load
-    prefix = "col_myfun"
-    #### Inference time LOAD previous pars  ########################################### 
-    if "path_pipeline" in pars :   
-        prepro   = load(pars["path_pipeline"] + f"/{prefix}_model.pkl" )
-        pars     = load(pars["path_pipeline"] + f"/{prefix}_pars.pkl" )
-        pars     = {} if pars is None else  pars
+    ### Clean Pars of extra heavy data
+    pars2= {}
+    for k,val in pars.items():
+        if isinstance(val, pd.DataFrame) :
+           continue
+        pars2[k] = val
 
-    #### Do something #################################################################
-    df_new         = df[col]  ### Do nithi
-    df_new.columns = [  col + "_myfun"  for col in df.columns ]
-    cols_new       = list(df_new.columns)
-
-    prepro   = None   ### model
-    pars_new = None   ### new params
-
-
-
-    ###################################################################################
-    ###### Training time save all #####################################################
     if "path_features_store" in pars and "path_pipeline_export" in pars :
        save(prepro,         pars["path_pipeline_export"] + f"/{prefix}_model.pkl" )
-       save(cols_new,       pars["path_pipeline_export"] + f"/{prefix}.pkl" )
-       save(pars_new,       pars["path_pipeline_export"] + f"/{prefix}_pars.pkl" )
+       save(cols_new,       pars["path_pipeline_export"] + f"/{prefix}_cols.pkl" )
+       save(pars2,          pars["path_pipeline_export"] + f"/{prefix}_pars.pkl" )
 
     ###### Training & Inference time : df + new column names ##########################
     col_pars = {"prefix" : prefix , "path" :   pars.get("path_pipeline_export", pars.get("path_pipeline", None)) }
@@ -101,6 +106,44 @@ def pd_col_atemplate(df: pd.DataFrame, col: list=None, pars: dict=None):
         "col_myfun" :  cols_new  ### new column list
     }
     return df_new, col_pars
+
+
+def pd_col_atemplate(df: pd.DataFrame, col: list=None, pars: dict=None):
+    """
+    Example of custom Processor
+    Used at prediction time
+        "path_pipeline"  :
+
+    Training time :
+        "path_features_store" :  to store intermediate dataframe
+        "path_pipeline_export":  to store pipeline  for later usage
+
+    """
+    prefix = "myfun"
+
+    #### Inference time LOAD previous pars  ###########################################
+    prepro, pars_saved, cols_saved = prepro_load(prefix, pars)
+    dfy, coly                      = pars['dfy'], pars['coly']
+
+
+    #### Do something #################################################################
+    if prepro is None :   ###  Training time
+        def prepro(df, pars:dict): return df    ### model
+        pars_prepro = {}   ### new params
+
+
+    df_new         = prepro(df[col], pars_prepro)  ### Do nithi
+    df_new.columns = [  col + f"_{prefix}"  for col in df.columns ]
+    cols_new       = list(df_new.columns)
+    pars_prepro    = pars
+
+
+
+    ###################################################################################
+    ###### Training time save all #####################################################
+    df_new, col_pars = prepro_save(prefix, pars, df_new, cols_new, prepro, pars_prepro)
+    return df_new, col_pars
+
 
 
 
@@ -134,7 +177,7 @@ def pd_coly(df: pd.DataFrame, col: list=None, pars: dict=None):
     df             = df[ df['_isfloat'] > 0 ]
     df[coly]       = df[coly].astype('float64')
     del df['_isfloat']
-    logs("----------df[coly]------------",df[coly])
+    log2("----------df[coly]------------",df[coly])
     ymin, ymax = pars.get('ymin', -9999999999.0), pars.get('ymax', 999999999.0)
     df = df[df[coly] > ymin]
     df = df[df[coly] < ymax]
@@ -147,6 +190,9 @@ def pd_coly(df: pd.DataFrame, col: list=None, pars: dict=None):
     if y_norm_fun is not None:
         df[coly] = df[coly].apply(lambda x: y_norm_fun(x))
         # save(y_norm_fun, f'{path_pipeline_export}/y_norm.pkl' )
+
+
+
 
     if pars.get('path_features_store', None) is not None:
         path_features_store = pars['path_features_store']
@@ -264,12 +310,18 @@ def pd_colnum_quantile_norm(df: pd.DataFrame, col: list=None, pars: dict=None):
 
 
 def pd_colnum_bin(df: pd.DataFrame, col: list=None, pars: dict=None):
+    """  float column into  binned columns
+    :param df:
+    :param col:
+    :param pars:
+    :return:
+    """
     from util_feature import  pd_colnum_tocat
+
 
     path_pipeline  = pars.get('path_pipeline', False)
     colnum_binmap  = load(f'{path_pipeline}/colnum_binmap.pkl') if  path_pipeline else None
     log(colnum_binmap)
-
     colnum = col
 
     log("### colnum Map numerics to Category bin  ###########################################")
@@ -280,6 +332,8 @@ def pd_colnum_bin(df: pd.DataFrame, col: list=None, pars: dict=None):
     ### Renaming colunm_bin with suffix
     colnum_bin = [x + "_bin" for x in list(colnum_binmap.keys())]
     log(colnum_bin)
+
+
 
     if 'path_features_store' in pars:
         scol = "_".join(col[:5])
@@ -514,23 +568,27 @@ def pd_colcat_encoder_generic(df: pd.DataFrame, col: list=None, pars: dict=None)
        #model         = load( pars['path_pipeline'] + f"/{prefix}_model.pkl" )
 
     ####### Custom Code ###############################################################
-    from category_encoders import HashingEncoder, WOEEncoder
+    import category_encoders as ce
+    # from category_encoders import HashingEncoder, WOEEncoder
     pars_model         = pars.get('model_pars', {})  if pars_model is None else pars_model
     pars_model['cols'] = col
     model_name         = pars.get('model_name', 'HashingEncoder')
 
-    model_class        = { 'HashingEncoder' : HashingEncoder  }[model_name]
-    model              = model_class(**pars_model)
-    dfcat_encoder      = model.fit_transform(df[col])
+    model_class        = { 'HashingEncoder' : ce.HashingEncoder  }[model_name]
+    modelx             = model_class(**pars_model)
+    dfcat_encoder      = modelx.fit_transform(df[col])
+    dfcat_encoder.index = df.index   ### Need to join correctly
 
-    dfcat_encoder.columns = [t + "_cod" for t in dfcat_encoder.columns ]
+    dfcat_encoder.columns = [t + f"_{model_name}" for t in dfcat_encoder.columns ]
     colcat_encoder        = list(dfcat_encoder.columns)
 
+    #log2('dfcat_encoder', dfcat_encoder )
+    #log2('dfcat_encoder', dfcat_encoder.isna().sum() )
 
     ###################################################################################
     if 'path_features_store' in pars and 'path_pipeline_export' in pars:
        save_features(dfcat_encoder, 'dfcat_encoder', pars['path_features_store'])
-       save(model,           pars['path_pipeline_export'] + f"/{prefix}_model.pkl" )
+       save(modelx,          pars['path_pipeline_export'] + f"/{prefix}_model.pkl" )
        save(pars_model,      pars['path_pipeline_export'] + f"/{prefix}_pars.pkl" )
        save(colcat_encoder,  pars['path_pipeline_export'] + f"/{prefix}.pkl" )
 
@@ -562,7 +620,7 @@ def pd_colcat_minhash(df: pd.DataFrame, col: list=None, pars: dict=None):
     dfcat_bin, col_hash_model= util_text.pd_coltext_minhash(df[colcat], colcat,
                                                             return_val="dataframe,param", **pars_minhash )
     colcat_minhash = list(dfcat_bin.columns)
-    log(col_hash_model)
+    log2(col_hash_model)
 
     ###################################################################################
     if 'path_features_store' in pars and 'path_pipeline_export' in pars:
@@ -606,7 +664,8 @@ def pd_col_genetic_transform(df: pd.DataFrame, col: list=None, pars: dict=None):
         Find Symbolic formulae for faeture engineering
 
     """
-    prefix = 'col_genetic'
+    prefix = 'genetic'
+
     ######################################################################################
     from gplearn.genetic import SymbolicTransformer
     from gplearn.functions import make_function
@@ -648,8 +707,8 @@ def pd_col_genetic_transform(df: pd.DataFrame, col: list=None, pars: dict=None):
         gp.fit(train_X, train_y)
 
     ##### Transform Data  #########################################
-    df_genetic = gp.transform(train_X)
-    tag = random.randint(0,10)   #### UNIQUE TAG
+    df_genetic   = gp.transform(train_X)
+    tag          = random.randint(0,10)   #### UNIQUE TAG
     col_genetic  = [ f"gen_{tag}_{i}" for i in range(df_genetic.shape[1])]
     df_genetic   = pd.DataFrame(df_genetic, columns= col_genetic, index = train_X.index )
     df_genetic.index = train_X.index
@@ -665,11 +724,12 @@ def pd_col_genetic_transform(df: pd.DataFrame, col: list=None, pars: dict=None):
 
     col_new = col_genetic
 
+
     ###################################################################################
     if 'path_features_store' in pars and 'path_pipeline_export' in pars:
        save_features(df_genetic, 'df_genetic', pars['path_features_store'])
        save(gp,             pars['path_pipeline_export'] + f"/{prefix}_model.pkl" )
-       save(col_genetic,    pars['path_pipeline_export'] + f"/{prefix}.pkl" )
+       save(col_genetic,    pars['path_pipeline_export'] + f"/{prefix}_col.pkl" )
        save(pars_gen_all,   pars['path_pipeline_export'] + f"/{prefix}_pars.pkl" )
        # save(form_dict,      pars['path_pipeline_export'] + f"/{prefix}_formula.pkl")
        save_json(form_dict, pars['path_pipeline_export'] + f"/{prefix}_formula.json")   ### Human readable
@@ -686,9 +746,6 @@ def pd_col_genetic_transform(df: pd.DataFrame, col: list=None, pars: dict=None):
 
 
 
-
-
-
 ######################################################################################
 def test():
     """
@@ -697,7 +754,7 @@ def test():
     """
     from util_feature import test_get_classification_data
     dfX, dfy = test_get_classification_data()
-    cols     = list(dfX.columsn)
+    cols     = list(dfX.columns)
     ll       = [ ('pd_colnum_bin', {}  )
                ]
 
@@ -705,7 +762,7 @@ def test():
         try :
            myfun = globals()[fname]
            res   = myfun(dfX, cols, pars)
-           log( f"Success, {fname}, {pars}, {e}")
+           log( f"Success, {fname}, {pars}")
         except Exception as e :
             log( f"Failed, {fname}, {pars}, {e}")
 

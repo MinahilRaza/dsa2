@@ -7,12 +7,15 @@ python source/run_train.py  run_train --config_name elasticnet  --path_data_trai
 activate py36 && python source/run_train.py  run_train   --n_sample 100  --config_name lightgbm  --path_model_config source/config_model.py  --path_output /data/output/a01_test/     --path_data_train /data/input/train/
 
 """
-import warnings,sys, os, json, importlib, copy
+import warnings
 warnings.filterwarnings('ignore')
+import sys, os, json, importlib
 
 ####################################################################################################
 #### Add path for python import
 sys.path.append( os.path.dirname(os.path.abspath(__file__)) + "/")
+
+#### Root folder analysis
 root = os.path.abspath(os.getcwd()).replace("\\", "/") + "/"
 print(root)
 
@@ -63,8 +66,8 @@ def save_features(df, name, path):
 
 
 def model_dict_load(model_dict, config_path, config_name, verbose=True):
-    """ Load the model dict from the python config file.
-       ### Issue wiht passing function durin pickle on disk
+    """
+       load the model dict from the python config file.
     :param model_dict:
     :param config_path:
     :param config_name:
@@ -72,21 +75,10 @@ def model_dict_load(model_dict, config_path, config_name, verbose=True):
     :return:
     """
     if model_dict is None :
-      log("#### Model Params Dynamic loading  ###############################################")
-      model_dict_fun = load_function_uri(uri_name=config_path + "::" + config_name)
-      model_dict    = model_dict_fun()   ### params 
-
-    else :
-        ### Passing dict 
-        ### Due to Error when saving on disk the model, function definition is LOST, need dynamic loca
-        path_config = model_dict[ 'global_pars']['config_path']
-
-        p1 = path_config + "::" + model_dict['model_pars']['post_process_fun'].__name__
-        model_dict['model_pars']['post_process_fun'] = load_function_uri( p1)   
-
-        p1 = path_config + "::" + model_dict['model_pars']['pre_process_pars']['y_norm_fun'] .__name__ 
-        model_dict['model_pars']['pre_process_pars']['y_norm_fun'] = load_function_uri( p1 ) 
-
+       log("#### Model Params Dynamic loading  ###############################################")
+       model_dict_fun = load_function_uri(uri_name=config_path + "::" + config_name)
+       model_dict     = model_dict_fun()   ### params
+    if verbose : log( model_dict )
     return model_dict
 
 
@@ -102,14 +94,14 @@ def map_model(model_name):
 
     ##### Custom folder
     if ".py" in model_name :
-       ### Asbolute path of the file
-       path = os.path.dirname(os.path.abspath(model_name))
+       path = os.path.parent(model_name)
        sys.path.append(path)
-       mod    = os.path.basename(model_name).replace(".py", "")
+       mod = os.path.basename(model_name)
        modelx = importlib.import_module(mod)
        return modelx
 
-    ##### Repo folder
+
+    ##### Local folder
     model_file = model_name.split(":")[0]
     if  'optuna' in model_name : model_file = 'optuna_lightgbm'
 
@@ -174,10 +166,6 @@ def train(model_dict, dfX, cols_family, post_process_fun):
     log('Model coly', coly)
     log('Model column type: ',data_pars['cols_model_type2'])
 
-    ### Only Parameters
-    data_pars_ref = copy.deepcopy(data_pars)
-
-    #### TODO : Lazy Dict to have large dataset
     data_pars['data_type'] = 'ram'
     data_pars['train'] = {'Xtrain' : dfX[colsX].iloc[:itrain, :],
                           'ytrain' : dfX[coly].iloc[:itrain],
@@ -188,12 +176,13 @@ def train(model_dict, dfX, cols_family, post_process_fun):
                           'yval'   : dfX[coly].iloc[ival:],
                           }
 
+
     log("#### Init, Train ############################################################")
     # from config_model import map_model    
     modelx = map_model(model_name)    
     log(modelx)
     modelx.reset()
-    modelx.init(model_pars, data_pars= data_pars_ref, compute_pars=compute_pars)
+    modelx.init(model_pars, compute_pars=compute_pars)
 
     if 'optuna' in model_name:
         modelx.fit(data_pars, compute_pars)
@@ -203,29 +192,15 @@ def train(model_dict, dfX, cols_family, post_process_fun):
         modelx.fit(data_pars, compute_pars)
 
 
-    log("#### Predict ################################################################")
-    ypred, ypred_proba = modelx.predict(dfX[colsX], data_pars= data_pars_ref, compute_pars=compute_pars)
+    log("#### Transform ################################################################")
+    dfX2 = modelx.transform(dfX[colsX], compute_pars=compute_pars)
+    dfX2.index = dfX.index
 
-    dfX[coly + '_pred'] = ypred  # y_norm(ypred, inverse=True)
+    for coli in dfX2.columns :
+       dfX2[coli]            = dfX2[coli].apply(lambda  x : post_process_fun(x) )
 
-    dfX[coly]            = dfX[coly].apply(lambda  x : post_process_fun(x) )
-    dfX[coly + '_pred']  = dfX[coly + '_pred'].apply(lambda  x : post_process_fun(x) )
-
-    if ypred_proba is None :  ### No proba
-        ypred_proba_val = None
-
-    elif len(ypred_proba.shape) <= 1  :  #### Single dim proba
-       ypred_proba_val      = ypred_proba[ival:]
-       dfX[coly + '_proba'] = ypred_proba
-
-    elif len(ypred_proba.shape) > 1 :   ## Muitple proba
-        from util_feature import np_conv_to_one_col
-        ypred_proba_val      = ypred_proba[ival:,:]
-        dfX[coly + '_proba'] = np_conv_to_one_col(ypred_proba, ";")  ### merge into string "p1,p2,p3,p4"
-        log(dfX.head(3).T)
-
-    log("Actual    : ",  dfX[coly ])
-    log("Prediction: ",  dfX[coly + '_pred'])
+    log("Actual    : ",  dfX[colsX])
+    log("Prediction: ",  dfX2)
 
     log("#### Metrics ###############################################################")
     from util_feature import  metrics_eval
@@ -250,7 +225,7 @@ def train(model_dict, dfX, cols_family, post_process_fun):
     a = load(model_path + "/model.pkl")
     log("Reload model pars", a.model_pars)
     
-    return dfX.iloc[:ival, :].reset_index(), dfX.iloc[ival:, :].reset_index(), stats
+    return dfX2.iloc[:ival, :].reset_index(), dfX2.iloc[ival:, :].reset_index(), stats
 
 
 ####################################################################################################
@@ -302,16 +277,16 @@ def run_train(config_name, config_path="source/config_model.py", n_sample=5000,
 
 
     log("#### Extract column names  #####################################################")
-    ### Actual column names for Model Input :  label y and Input X (colnum , colcat), remove duplicate names
+    ### Actual column names for Model Input :  label y and Input X (colnum , colcat)
     model_dict['data_pars']['coly']       = cols['coly']
-    model_dict['data_pars']['cols_model'] = list(set(sum([  cols[colgroup] for colgroup in model_dict['data_pars']['cols_model_group'] ]   , []) ))
+    model_dict['data_pars']['cols_model'] = sum([  cols[colgroup] for colgroup in model_dict['data_pars']['cols_model_group'] ]   , [])
 
 
-    #### Col Group by column type : Sparse, continuous, .... (ie Neural Network feed Input, remove duplicate names
+    #### Col Group by column type : Sparse, continuous, .... (ie Neural Network feed Input
     ## 'coldense' = [ 'colnum' ]     'colsparse' = ['colcat' ]
     model_dict['data_pars']['cols_model_type2'] = {}
     for colg, colg_list in model_dict['data_pars'].get('cols_model_type', {}).items() :
-        model_dict['data_pars']['cols_model_type2'][colg] = list(set(sum([  cols[colgroup] for colgroup in colg_list ]   , [])))
+        model_dict['data_pars']['cols_model_type2'][colg] = sum([  cols[colgroup] for colgroup in colg_list ]   , [])
 
 
     log("#### Train model: #############################################################")
@@ -332,12 +307,8 @@ def run_train(config_name, config_path="source/config_model.py", n_sample=5000,
     else :
         log("#### Export ##################################################################")
         os.makedirs(path_check_out, exist_ok=True)
-        colexport = [cols['colid'], cols['coly'], cols['coly'] + "_pred"]
-        dfXy[colexport].reset_index().to_csv(path_check_out + "/pred_check.csv")  # Only results
         dfXy.to_parquet(path_check_out + "/dfX.parquet")  # train input data generate parquet
-        #dfXy.to_csv(path_check_out + "/dfX.csv")  # train input data generate csv
         dfXytest.to_parquet(path_check_out + "/dfXtest.parquet")  # Test input data  generate parquet
-        #dfXytest.to_csv(path_check_out + "/dfXtest.csv")  # Test input data  generate csv
         log("######### Finish #############################################################", )
 
 

@@ -56,6 +56,7 @@ def pd_ts_date(df: pd.DataFrame, cols: list=None, pars: dict=None):
     }
     return dfdate, col_pars
 
+
 def pd_ts_rolling(df: pd.DataFrame, cols: list=None, pars: dict=None):
     """
       Rolling statistics
@@ -63,12 +64,16 @@ def pd_ts_rolling(df: pd.DataFrame, cols: list=None, pars: dict=None):
     """
     cat_cols     = []
     col_new      = []
+    id_cols      = []
     colgroup     = pars.get('col_groupby', ['id'])
     colstat      = pars['col_stat']
     lag_list     = pars.get('lag_list', [7, 14, 30, 60, 180])
-    id_cols      = []
+    len_shift    = pars.get('len_shift', 28)
 
-    len_shift = 28
+    len_shift_list   = pars.get('len_shift_list' , [1,7,14])
+    len_window_list  = pars.get('len_window_list', [7, 14, 30, 60])
+
+
     for i in lag_list:
         print('Rolling period:', i)
         df['rolling_mean_' + str(i)] = df.groupby(colgroup)[colstat].transform(
@@ -80,12 +85,11 @@ def pd_ts_rolling(df: pd.DataFrame, cols: list=None, pars: dict=None):
         col_new.append('rolling_mean_' + str(i))
         col_new.append('rolling_std_' + str(i))
 
-    # Rollings
-    # with sliding shift
-    for len_shift in [1, 7, 14]:
+    # Rollings with sliding shift
+    for len_shift in len_shift_list:
         print('Shifting period:', len_shift)
-        for len_window in [7, 14, 30, 60]:
-            col_name = 'rolling_mean_tmp_' + str(len_shift) + '_' + str(len_window)
+        for len_window in len_window_list:
+            col_name = f'rolling_mean_tmp_{len_shift}_{len_window}'
             df[col_name] = df.groupby(colgroup)[colstat].transform(
                 lambda x: x.shift(len_shift).rolling(len_window).mean())
             col_new.append(col_name)
@@ -98,34 +102,38 @@ def pd_ts_rolling(df: pd.DataFrame, cols: list=None, pars: dict=None):
 
 
  
-def preprocessing_data(train_data):
-    train_data['date'] = pd.to_datetime(train_data['date'])
-    
-    #time features
-    df1, col1 = pd_ts_date(train_data, ['date'], {'col_add':['day', 'month', 'year', 'weekday']})
-    
-    #feature engineering
-    
-    #lag features, rolling window features
-    df2, col2 = pd_ts_rolling(train_data, ['date', 'item', 'store', 'sales'], {'col_groupby' : ['store','item'],'col_stat': 'sales', 'lag_list': [7, 30]})
-    
-    #combine
-    train_data = pd.concat([train_data, df1], axis=1)
-    
-    col = [i for i in train_data.columns if i not in ['date','id']]
-    y = 'sales'
+def preprocessing_data(df):
+    # df['date'] = pd.to_datetime(df['date'])
+    colid = 'date'
+    df = df.set_index(colid)
 
-    return train_data, col, y
+    #### time features
+    df1, col1 = pd_ts_date(df, cols=['date'], pars={'col_add':['day', 'month', 'year', 'weekday']})
+    dfall = pd.concat([df, df2], axis=1)
+    
+    #### lag features, rolling window features
+    df2, col2 = pd_ts_rolling(df, 
+                              cols= ['date', 'item', 'store', 'sales'], 
+                              pars= {'col_groupby' : ['store','item'],
+                                     'col_stat':     'sales', 'lag_list': [7, 30]})    
+    dfall = pd.concat([dfall, df2], axis=1)
 
 
 
+    ##### 
+    col = [i for i in dfall.columns if i not in ['date','id']]
+    y   = 'sales'
 
-train_data, col, y = preprocessing_data(train_df)
+    return dfall, col, y
+
+
+
+df, col, y = preprocessing_data(train_df)
 
 
 ########################################################################################
 # split into train and validation and test data
-train_x, test_x, train_y, test_y = train_test_split(train_data[col],train_data[y], test_size=0.3, random_state=2018)
+train_x, test_x, train_y, test_y = train_test_split(df[col],df[y], test_size=0.3, random_state=2018)
 val_x, test_x, val_y, test_y = train_test_split(test_x[col],test_y, test_size=0.33, random_state=2018)
 
 # Train function

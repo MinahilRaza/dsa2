@@ -13,6 +13,7 @@ scipy>=0.19.1
 cloudpickle
 gplearn
 sympy
+dill
 #pyod==0.3.0
 #featuretools==0.13.3
 #featuretools-sklearn-transformer==0.1.0
@@ -23,9 +24,9 @@ sympy
 nltk
 category_encoders
 imblearn
-
+umap
 ##########################################
-# tensorflow_text>=2.0.0rc0
+tensorflow_text>=2.0.0rc0
 # simpleneighbors[annoy]
 # cython
 #cycler==0.10.0
