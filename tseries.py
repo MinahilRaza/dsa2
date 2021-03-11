@@ -64,13 +64,13 @@ config_default   = "config1"    ### name of function which contains data configu
 cols_input_type_1 = {
      "coly"   :   "sales"
     ,"colid"  :   "id_date"   ### used for JOIN tables, duplicate date
-    ,"colcat" :   ["shop", "item" ]
+    ,"colcat" :   ["store", "item" ]
     ,"colnum" :   []
     ,"coltext" :  []
     ,"coldate" :  ['date']
 
     ### Specific for time sereis
-    ,"coltseries" :  ['date', 'shop', 'item', 'sales']
+    ,"col_tseries" :  ['date', 'store', 'item', 'sales']
 
     ,"colcross" : [ ]
 }
@@ -174,7 +174,7 @@ def pd_dsa2_custom(df: pd.DataFrame, col: list=None, pars: dict=None):
     if prepro is None :   ###  Training time
         dfy, coly = pars['dfy'], pars['coly']
         coldate   = pars['coldate']
-        df        = df.set_index(coldate)
+        #df        = df.set_index(coldate)
 
         #### time features
         dfi, coli = pd_ts_date(df, cols=[coldate], pars={'col_add': ['day', 'month', 'year', 'weekday']})
